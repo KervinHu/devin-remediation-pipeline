@@ -108,5 +108,33 @@ class DevinClient:
             )
             resp.raise_for_status()
 
+    async def get_org_usage_metrics(self) -> dict[str, Any]:
+        """Devin org-level usage counters: sessions / searches / PRs.
+
+        This is Devin's own accounting (includes sessions created outside this
+        pipeline, e.g. from the web app), so it's a useful cross-check for the
+        "is this working" question independent of our local DB.
+        """
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.get(
+                f"{settings.org_base_url}/metrics/usage", headers=self._headers
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_org_total_acus(self) -> float:
+        """Total ACUs for the org's current billing cycle.
+
+        Consumption is aggregated per day with a PST midnight boundary, so the
+        current day's spend may not appear until the cycle rolls over. Real-time
+        per-session cost is visible in the Devin "Usage & Limits" UI.
+        """
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.get(
+                f"{settings.org_base_url}/consumption/daily", headers=self._headers
+            )
+            resp.raise_for_status()
+            return float(resp.json().get("total_acus") or 0.0)
+
 
 devin = DevinClient()

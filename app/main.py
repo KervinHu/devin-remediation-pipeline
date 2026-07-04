@@ -12,8 +12,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -21,6 +23,7 @@ from fastapi.templating import Jinja2Templates
 
 from . import db, metrics
 from .config import settings
+from .devin_client import devin
 from .github_client import Issue, github
 from .orchestrator import handle_issue
 from .poller import start_background_loops
@@ -32,6 +35,26 @@ logging.basicConfig(
 log = logging.getLogger("main")
 
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+# Cache Devin org metrics so the auto-refreshing dashboard (every 15s) doesn't
+# hit the Devin API on every page load. Serves stale data if a fetch fails.
+_USAGE_TTL_SECONDS = 60.0
+_usage_cache: dict[str, Any] = {"at": 0.0, "data": None}
+
+
+async def _get_org_usage() -> Optional[dict[str, Any]]:
+    now = time.time()
+    cached = _usage_cache["data"]
+    if cached is not None and now - _usage_cache["at"] < _USAGE_TTL_SECONDS:
+        return cached
+    try:
+        data = await devin.get_org_usage_metrics()
+        data["total_acus"] = await devin.get_org_total_acus()
+    except Exception as exc:  # keep the dashboard alive on API hiccups
+        log.warning("org usage metrics fetch failed: %s", exc)
+        return cached  # stale (or None if never fetched)
+    _usage_cache.update(at=now, data=data)
+    return data
 
 
 @asynccontextmanager
@@ -116,7 +139,9 @@ async def simulate(issue_number: int):
 
 @app.get("/stats")
 async def stats():
-    return JSONResponse(metrics.compute_stats())
+    data = metrics.compute_stats()
+    data["devin_org"] = await _get_org_usage()
+    return JSONResponse(data)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)

@@ -6,7 +6,7 @@ requests using the [Devin API](https://docs.devin.ai/api-reference/overview).
 > Label an issue `devin-fix` → a GitHub webhook fires → the pipeline spins up an
 > autonomous Devin session → Devin navigates the repo, makes the change, runs
 > lint/tests, and opens a PR → progress is streamed back onto the issue and a
-> live dashboard shows throughput, success rate, and cost (ACUs).
+> live dashboard shows throughput, success rate, and time-to-PR.
 
 Built for the Apache Superset fork [`KervinHu/superset`](https://github.com/KervinHu/superset).
 
@@ -130,8 +130,8 @@ cloudflared tunnel --url http://localhost:8000
 ```
 
 Then watch <http://localhost:8000/dashboard>. Each issue moves
-`queued → running → pr_open → finished`, comments appear on the GitHub issue,
-and Devin opens a PR against the fork.
+`queued → running → pr_open → awaiting_review → finished`, comments appear on the
+GitHub issue, and Devin opens a PR against the fork.
 
 No public tunnel handy? Trigger a specific issue directly:
 
@@ -144,10 +144,19 @@ curl -X POST http://localhost:8000/simulate/<issue_number>
 - **`/dashboard`** — live (auto-refresh) KPI cards + per-issue table with links
   to each Devin session and the resulting PR.
 - **`/stats`** — the same metrics as JSON for scraping/alerting:
-  total, active, finished, failed, **success rate**, **PRs opened**,
-  **total ACUs consumed**, **average time-to-PR**.
+  total, active, finished, failed, **success rate**, **PRs opened**, and
+  **average time-to-PR**, plus Devin org-level counters (sessions / PRs).
+- **Cost** — Devin meters usage in ACUs, aggregated per billing cycle (PST
+  boundary), so the authoritative per-session dollar cost lives in Devin's
+  **Usage & Limits** view. The pipeline reads these figures faithfully rather
+  than estimating them.
 - **Structured logs** — every state transition (session created, PR opened,
   finished/failed) is logged and mirrored as a GitHub issue comment.
+
+**How `success rate` is defined:** `resolved / (resolved + failed)`, where
+`resolved` = Devin opened a PR and finished its part (`awaiting_review` or
+`finished`) and `failed` = the session ended with no PR. Issues still in flight
+are excluded from the denominator, so active work doesn't distort the rate.
 
 ## Extending in a real engagement
 

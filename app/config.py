@@ -61,8 +61,12 @@ class Settings:
     )
 
     @property
+    def org_base_url(self) -> str:
+        return f"{self.devin_base_url}/organizations/{self.org_id}"
+
+    @property
     def sessions_url(self) -> str:
-        return f"{self.devin_base_url}/organizations/{self.org_id}/sessions"
+        return f"{self.org_base_url}/sessions"
 
     def session_url(self, session_id: str) -> str:
         return f"{self.sessions_url}/{session_id}"
