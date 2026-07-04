@@ -92,6 +92,11 @@ def ensure_labels(client: httpx.Client, base: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--no-trigger",
+        action="store_true",
+        help="create issues WITHOUT the trigger label (add it later to fire the webhook)",
+    )
     args = ap.parse_args()
 
     repo = settings.github_repo
@@ -106,12 +111,15 @@ def main() -> None:
     with httpx.Client(timeout=30) as client:
         ensure_labels(client, base)
         for issue in SEED_ISSUES:
+            labels = issue["labels"]
+            if args.no_trigger:
+                labels = [lbl for lbl in labels if lbl != TRIGGER]
             r = client.post(
                 f"{base}/issues", headers=_headers(),
                 json={
                     "title": issue["title"],
                     "body": issue["body"],
-                    "labels": issue["labels"],
+                    "labels": labels,
                 },
             )
             r.raise_for_status()

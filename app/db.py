@@ -14,11 +14,15 @@ from typing import Any, Iterator, Optional
 from .config import settings
 
 # Pipeline-level status (derived from Devin session state).
-STATUS_QUEUED = "queued"      # session created, no PR yet
-STATUS_RUNNING = "running"    # Devin actively working
-STATUS_PR_OPEN = "pr_open"    # Devin opened a PR (still may be iterating)
-STATUS_FINISHED = "finished"  # terminal + PR exists -> success
-STATUS_FAILED = "failed"      # terminal + no PR -> failure
+STATUS_QUEUED = "queued"                  # session created, no PR yet
+STATUS_RUNNING = "running"                # Devin actively working
+STATUS_PR_OPEN = "pr_open"                # PR opened, Devin still working
+STATUS_AWAITING_REVIEW = "awaiting_review"  # PR opened + Devin idle -> done, needs human review
+STATUS_FINISHED = "finished"              # session terminal + PR exists -> success
+STATUS_FAILED = "failed"                  # session terminal + no PR -> failure
+
+# States where Devin has produced a PR and finished its part of the work.
+RESOLVED_STATUSES = {STATUS_AWAITING_REVIEW, STATUS_FINISHED}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS remediations (

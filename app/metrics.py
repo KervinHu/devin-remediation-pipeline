@@ -17,11 +17,13 @@ def compute_stats() -> dict[str, Any]:
     for r in rows:
         by_status[r["status"]] = by_status.get(r["status"], 0) + 1
 
-    finished = by_status.get(db.STATUS_FINISHED, 0)
+    # "Resolved" = Devin produced a PR and finished its part (finished or awaiting review).
+    resolved = sum(by_status.get(s, 0) for s in db.RESOLVED_STATUSES)
     failed = by_status.get(db.STATUS_FAILED, 0)
-    active = total - finished - failed
-    terminal = finished + failed
-    success_rate = round(100 * finished / terminal, 1) if terminal else None
+    active = total - resolved - failed
+    decided = resolved + failed
+    # success rate = of the issues Devin has finished with, how many produced a PR.
+    success_rate = round(100 * resolved / decided, 1) if decided else None
 
     prs_opened = sum(1 for r in rows if r.get("pr_url"))
     total_acus = round(sum(float(r.get("acus_consumed") or 0) for r in rows), 2)
@@ -34,10 +36,10 @@ def compute_stats() -> dict[str, Any]:
     return {
         "total": total,
         "active": active,
-        "finished": finished,
+        "resolved": resolved,
         "failed": failed,
         "prs_opened": prs_opened,
-        "success_rate": success_rate,          # % of terminal that produced a PR
+        "success_rate": success_rate,          # % of decided that produced a PR
         "total_acus": total_acus,
         "avg_time_to_pr_seconds": _avg(ttp_values),
         "by_status": by_status,

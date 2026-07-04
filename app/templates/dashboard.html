@@ -37,6 +37,7 @@
              display:inline-block; }
     .b-finished { background:rgba(46,160,67,.18); color:#3fb950; }
     .b-pr_open  { background:rgba(31,111,235,.18); color:#58a6ff; }
+    .b-awaiting_review { background:rgba(163,113,247,.18); color:#a371f7; }
     .b-running  { background:rgba(210,153,34,.18); color:#e3b341; }
     .b-queued   { background:rgba(139,148,158,.18); color:#8b949e; }
     .b-failed   { background:rgba(218,54,51,.18); color:#f85149; }
@@ -54,7 +55,7 @@
   <section class="grid">
     <div class="card"><div class="label">Total issues</div><div class="value">{{ s.total }}</div></div>
     <div class="card"><div class="label">Active</div><div class="value">{{ s.active }}</div></div>
-    <div class="card"><div class="label">Finished</div><div class="value" style="color:var(--green)">{{ s.finished }}</div></div>
+    <div class="card"><div class="label">Resolved (PR)</div><div class="value" style="color:var(--green)">{{ s.resolved }}</div></div>
     <div class="card"><div class="label">Failed</div><div class="value" style="color:var(--red)">{{ s.failed }}</div></div>
     <div class="card"><div class="label">Success rate</div>
       <div class="value">{{ s.success_rate if s.success_rate is not none else "—" }}{{ "%" if s.success_rate is not none else "" }}</div></div>

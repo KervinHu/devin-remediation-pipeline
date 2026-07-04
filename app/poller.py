@@ -22,10 +22,18 @@ from .orchestrator import handle_issue
 log = logging.getLogger("poller")
 
 
+# Devin status_detail values that mean the session is idle / waiting on a human.
+IDLE_DETAILS = {"waiting_for_user", "waiting_for_input", "inactivity"}
+
+
 def _derive_status(view: SessionView) -> str:
     if view.is_terminal:
         return db.STATUS_FINISHED if view.pr_url else db.STATUS_FAILED
     if view.pr_url:
+        # PR is open; if Devin has gone idle, it's done and awaiting human review.
+        detail = (view.status_detail or "").lower()
+        if view.status == "suspended" or detail in IDLE_DETAILS:
+            return db.STATUS_AWAITING_REVIEW
         return db.STATUS_PR_OPEN
     if view.status in {"running", "working", "resuming"}:
         return db.STATUS_RUNNING
@@ -73,6 +81,14 @@ async def poll_active_once() -> None:
                     row["issue_number"],
                     f"✅ **Devin opened a pull request:** {view.pr_url}\n\n"
                     f"Session: {view.url}",
+                )
+            elif new_status == db.STATUS_AWAITING_REVIEW and prev_status != db.STATUS_AWAITING_REVIEW:
+                summary = _extract_summary(view) or "Remediation complete."
+                await github.comment(
+                    row["issue_number"],
+                    f"🟣 **Remediation complete — awaiting human review.** {summary}\n\n"
+                    f"Devin has finished and is idle. PR: {view.pr_url}\n"
+                    f"ACUs consumed: {view.acus_consumed}",
                 )
             elif new_status == db.STATUS_FINISHED and prev_status != db.STATUS_FINISHED:
                 summary = _extract_summary(view) or "Remediation complete."
