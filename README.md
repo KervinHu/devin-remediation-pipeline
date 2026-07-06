@@ -1,78 +1,34 @@
 # Devin Superset Remediation Pipeline
 
-An **event-driven automation** that turns GitHub issues into merged-ready pull
-requests using the [Devin API](https://docs.devin.ai/api-reference/overview).
+An **event-driven** automation that turns labeled GitHub issues into
+review-ready pull requests using the [Devin API](https://docs.devin.ai/api-reference/overview).
 
-> Label an issue `devin-fix` → a GitHub webhook fires → the pipeline spins up an
-> autonomous Devin session → Devin navigates the repo, makes the change, runs
-> lint/tests, and opens a PR → progress is streamed back onto the issue and a
-> live dashboard shows throughput, success rate, and time-to-PR.
+> Label an issue `devin-fix`, a GitHub webhook fires, and the pipeline starts an
+> autonomous Devin session. Devin reads the repo, makes the change, runs
+> lint/tests, and opens a PR. Progress is streamed back onto the issue, and a
+> live dashboard tracks throughput, success rate, and time-to-PR.
 
-Built for the Apache Superset fork [`KervinHu/superset`](https://github.com/KervinHu/superset).
+Built against the Apache Superset fork [`KervinHu/superset`](https://github.com/KervinHu/superset).
 
 ---
 
 ## Why this matters
 
-Dependency bumps, lint debt, and small bug/doc fixes are a constant tax on
+Dependency bumps, lint debt, and small bug or doc fixes are a constant tax on
 engineering teams: individually trivial, collectively expensive, and easy to
-deprioritize. This pipeline makes **Devin the core primitive** for that class of
-work — the "understand → change → validate → open PR" loop is fully autonomous.
-The system around it only does two things: **orchestration** and
+deprioritize. This pipeline makes **Devin the primitive** for that class of
+work. The "understand, change, validate, open PR" loop runs with no human in
+it; everything around Devin does just two jobs: **orchestration** and
 **observability**.
 
 ## Architecture
 
-```
-   ┌──────────────┐   issues.labeled (devin-fix)     ┌────────────────────────┐
-   │   GitHub      │ ───────────────────────────────► │  POST /webhook/github  │
-   │  (fork repo)  │   HMAC-SHA256 signed webhook      │  (HMAC verified)       │
-   └──────────────┘                                    └───────────┬────────────┘
-          ▲  ▲                                                     │
-          │  │  progress comments                                 ▼
-          │  │                                            ┌──────────────────┐
-          │  └────────────────────────────────────────── │   Orchestrator   │
-          │                                               │  classify → prompt│
-          │                                               │  create session   │
-          │                    ┌────────────┐  poll        └────────┬─────────┘
-          │                    │  Devin API │ ◄──────────────────────┤
-          │                    │ (v3, org)  │                        │ persist
-          │                    └─────┬──────┘                        ▼
-          │   comment PR / result    │ status, pr_url, acus   ┌────────────┐
-          └──────────────────────────┴────────────────────── │  SQLite    │
-                                                              └─────┬──────┘
-   Reconcile loop (safety net): scans labeled issues, backfills any │
-   the webhook missed  ──────────────────────────────────────────► │
-                                                                    ▼
-                                                   GET /dashboard  &  /stats
-                                          (KPIs: active / done / failed /
-                                           success rate / ACUs / time-to-PR)
-```
+![Architecture diagram](docs/imgs/architecture.drawio.png)
 
-**Webhook is the primary trigger; the reconcile loop is a safety net** — webhook
-deliveries can be dropped, so a background loop periodically reconciles labeled
-issues against what we've already processed. This is what makes the event-driven
-design production-safe.
-
-## Project layout
-
-```
-app/
-  main.py          FastAPI: /webhook/github, /simulate/{n}, /dashboard, /stats, /healthz
-  config.py        env loading (+ normalizes the Devin key's cog_ prefix)
-  devin_client.py  Devin v3 API wrapper (create / get / message)
-  github_client.py GitHub wrapper (read issue, list labeled, comment)
-  orchestrator.py  issue event -> prompt -> Devin session -> DB (idempotent)
-  poller.py        poll active sessions + reconcile missed issues
-  prompts.py       per-issue-type structured prompt templates
-  db.py            SQLite persistence
-  metrics.py       KPI aggregation
-  templates/dashboard.html
-scripts/
-  create_issues.py     seed the fork with 3 remediable issues
-  register_webhook.sh  point the GitHub webhook at your tunnel URL
-  demo.sh              one-shot demo driver
-```
+**The webhook is the primary trigger; the reconcile loop is a safety net.**
+Because webhook deliveries can be dropped, a background loop periodically scans
+labeled issues and backfills anything the webhook missed. That safety net is
+what makes the pipeline safe to run unattended.
 
 ## Configuration
 
@@ -139,28 +95,49 @@ No public tunnel handy? Trigger a specific issue directly:
 curl -X POST http://localhost:8000/simulate/<issue_number>
 ```
 
-## Observability — "how would a leader know this is working?"
+### What it looks like
 
-- **`/dashboard`** — live (auto-refresh) KPI cards + per-issue table with links
+The dashboard, with live KPI cards and a per-issue table:
+
+![Pipeline dashboard](docs/imgs/my-fastapi-console.jpg)
+
+A Devin session working the issue:
+
+![Devin session](docs/imgs/devin-console.jpg)
+
+And the PR Devin opens against the fork:
+
+![Devin pull request](docs/imgs/github-pr.jpg)
+
+## Observability
+
+The dashboard and `/stats` endpoint answer the question a lead actually asks:
+is this working, and what is it costing?
+
+- `/dashboard` — live (auto-refresh) KPI cards plus a per-issue table with links
   to each Devin session and the resulting PR.
-- **`/stats`** — the same metrics as JSON for scraping/alerting:
-  total, active, finished, failed, **success rate**, **PRs opened**, and
-  **average time-to-PR**, plus Devin org-level counters (sessions / PRs).
-- **Cost** — Devin meters usage in ACUs, aggregated per billing cycle (PST
+- `/stats` — the same metrics as JSON for scraping or alerting: total, active,
+  finished, failed, **success rate**, **PRs opened**, and **average time-to-PR**,
+  plus Devin org-level counters (sessions / PRs).
+- Cost — Devin meters usage in ACUs, aggregated per billing cycle (PST
   boundary), so the authoritative per-session dollar cost lives in Devin's
-  **Usage & Limits** view. The pipeline reads these figures faithfully rather
-  than estimating them.
-- **Structured logs** — every state transition (session created, PR opened,
-  finished/failed) is logged and mirrored as a GitHub issue comment.
+  Usage & Limits view. The pipeline reads those figures rather than estimating
+  them.
+- Structured logs — the backend logs startup, the poll/reconcile loops, and
+  each Devin session it creates (with the issue's classified type and trigger
+  source). Session-level transitions (PR opened, finished, failed) are mirrored
+  onto the GitHub issue as comments.
 
-**How `success rate` is defined:** `resolved / (resolved + failed)`, where
-`resolved` = Devin opened a PR and finished its part (`awaiting_review` or
-`finished`) and `failed` = the session ended with no PR. Issues still in flight
-are excluded from the denominator, so active work doesn't distort the rate.
+![Backend logs](docs/imgs/terminal-log.jpg)
+
+Success rate is defined as `resolved / (resolved + failed)`, where `resolved`
+means Devin opened a PR and finished its part (`awaiting_review` or `finished`)
+and `failed` means the session ended with no PR. Issues still in flight are
+excluded from the denominator, so active work doesn't distort the rate.
 
 ## Extending in a real engagement
 
-- Trigger from a security scanner (Snyk/Dependabot/CodeQL) instead of a manual label.
-- Devin **playbooks** to encode repo-specific conventions and raise success rate.
+- Trigger from a security scanner (Snyk / Dependabot / CodeQL) instead of a manual label.
+- Use Devin playbooks to encode repo-specific conventions and raise success rate.
 - Fan out across many repos; add per-team ACU budgets and SLOs to the dashboard.
-- Gate auto-merge on CI green + required reviewers.
+- Gate auto-merge on CI green plus required reviewers.
